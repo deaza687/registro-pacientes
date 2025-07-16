@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro de Observaciones de Pacientes</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .observation-content { /* Ahora oculto por defecto en la aplicación principal */
+            display: none;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f0f9ff;
+            border-radius: 4px;
+        }
+        .patient-name {
+            cursor: pointer;
+            color: #2563eb;
+            font-weight: bold;
+        }
+        .patient-name:hover {
+            text-decoration: underline;
+        }
+        /* Estilos para el scrollbar en navegadores WebKit */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a0aec0;
+        }
+        /* Estilo para el botón de dictado por voz */
+        .voice-dictation-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            margin-left: 8px;
+            vertical-align: middle;
+            color: #4a90e2; /* Color por defecto */
+        }
+        .voice-dictation-btn.listening {
+            color: #ef4444; /* Rojo cuando está escuchando */
+            animation: pulse 1s infinite alternate; /* Animación de pulsación */
+        }
+        @keyframes pulse {
+            from { transform: scale(1); opacity: 1; }
+            to { transform: scale(1.1); opacity: 0.7; }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-4">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
+        <h1 class="text-2xl font-bold text-center mb-6">Registro de Observaciones de Pacientes</h1>
+        
+        <!-- Formulario -->
+        <div class="mb-6 space-y-3">
+            <input type="text" id="nombrePaciente" placeholder="Nombre del paciente" class="w-full p-2 border rounded">
+            <input type="text" id="idDocumento" placeholder="ID de Documento (opcional)" class="w-full p-2 border rounded">
+            <div class="flex items-center">
+                <textarea id="observacion" placeholder="Observación" class="flex-grow p-2 border rounded" rows="3"></textarea>
+                <button id="voiceDictationBtn" class="voice-dictation-btn" title="Dictar por voz">🎤</button>
+            </div>
+            <button id="saveButton" onclick="guardarPaciente()" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">
+                Guardar Observación
+            </button>
+            <button id="cancelEditButton" onclick="cancelarEdicion()" class="w-full bg-gray-400 text-white p-2 rounded hover:bg-gray-500 hidden">
+                Cancelar Edición
+            </button>
+        </div>
+        
+        <!-- Lista de pacientes -->
+        <div class="mb-6">
+            <h2 class="text-xl font-semibold mb-3">Pacientes Registrados</h2>
+            <div id="lista-pacientes" class="space-y-2"></div>
+        </div>
+        
+        <!-- Botones de acción -->
+        <div class="flex space-x-2">
+            <button onclick="generarHTML()" class="flex-1 bg-green-500 text-white p-2 rounded hover:bg-green-600">
+                Generar HTML
+            </button>
+            <button onclick="limpiarTodo()" class="flex-1 bg-red-500 text-white p-2 rounded hover:bg-red-600">
+                Limpiar Todo
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let editingPacienteId = null; // Variable global para rastrear el ID del paciente en edición
+        const saveButton = document.getElementById('saveButton');
+        const cancelEditButton = document.getElementById('cancelEditButton');
+        const nombreInput = document.getElementById('nombrePaciente');
+        const idDocumentoInput = document.getElementById('idDocumento');
+        const observacionInput = document.getElementById('observacion');
+        const voiceDictationBtn = document.getElementById('voiceDictationBtn');
+
+        // Cargar pacientes al iniciar
+        document.addEventListener('DOMContentLoaded', cargarPacientes);
+        document.addEventListener('DOMContentLoaded', setupVoiceDictation);
+
+        function guardarPaciente() {
+            const nombre = nombreInput.value.trim();
+            const idDocumento = idDocumentoInput.value.trim() || 'Sin ID';
+            const observacion = observacionInput.value.trim();
+            
+            if (!nombre) {
+                alert('Por favor ingresa el nombre del paciente'); 
+                return;
+            }
+            
+            let pacientes = JSON.parse(localStorage.getItem('pacientes') || '[]');
+            
+            if (editingPacienteId) {
+                // Modo edición
+                const index = pacientes.findIndex(pac => pac.id === editingPacienteId);
+                if (index !== -1) {
+                    pacientes[index] = {
+                        ...pacientes[index], // Mantener otros datos si los hubiera
+                        nombre,
+                        idDocumento,
+                        observacion,
+                        fecha: new Date().toLocaleDateString('es-ES') // Actualizar fecha de modificación
+                    };
+                }
+            } else {
+                // Modo añadir nuevo
+                const paciente = {
+                    id: Date.now(), // ID único basado en la marca de tiempo
+                    nombre,
+                    idDocumento,
+                    observacion,
+                    fecha: new Date().toLocaleDateString('es-ES')
+                };
+                pacientes.push(paciente);
+            }
+            
+            localStorage.setItem('pacientes', JSON.stringify(pacientes));
+            
+            // Actualizar lista y limpiar formulario
+            cargarPacientes();
+            cancelarEdicion(); // Limpia el formulario y resetea el modo edición
+        }
+
+        function cargarPacientes() {
+            const pacientes = JSON.parse(localStorage.getItem('pacientes') || '[]');
+            const lista = document.getElementById('lista-pacientes');
+            
+            lista.innerHTML = pacientes.length 
+                ? pacientes.map(pac => `
+                    <div class="p-3 border rounded">
+                        <div class="flex justify-between items-center">
+                            <span class="patient-name" onclick="toggleObservation(${pac.id})">
+                                ${pac.nombre} (${pac.idDocumento})
+                            </span>
+                            <button onclick="eliminarPaciente(${pac.id})" class="text-red-500 hover:text-red-700 ml-2">
+                                ✕ Paciente
+                            </button>
+                        </div>
+                        <div id="obs-${pac.id}" class="observation-content">
+                            <p class="text-sm text-gray-500">${pac.fecha}</p>
+                            <p>${pac.observacion || 'Sin observación'}</p>
+                            <div class="mt-2 text-right">
+                                <button onclick="iniciarEdicionObservacion(${pac.id})" class="bg-yellow-500 text-white text-xs px-2 py-1 rounded hover:bg-yellow-600 mr-2">
+                                    Editar Obs.
+                                </button>
+                                <button onclick="borrarObservacionIndividual(${pac.id})" class="bg-red-500 text-white text-xs px-2 py-1 rounded hover:bg-red-600">
+                                    Borrar Obs.
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')
+                : '<p class="text-gray-500">No hay pacientes registrados</p>';
+        }
+
+        function toggleObservation(id) {
+            const obs = document.getElementById(`obs-${id}`);
+            obs.style.display = obs.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function iniciarEdicionObservacion(id) {
+            const pacientes = JSON.parse(localStorage.getItem('pacientes') || '[]');
+            const paciente = pacientes.find(pac => pac.id === id);
+
+            if (paciente) {
+                nombreInput.value = paciente.nombre;
+                idDocumentoInput.value = paciente.idDocumento;
+                observacionInput.value = paciente.observacion;
+                editingPacienteId = id;
+                saveButton.textContent = 'Actualizar Observación';
+                cancelEditButton.classList.remove('hidden');
+                // Desplazar al inicio del formulario para facilitar la edición
+                nombreInput.focus();
+            }
+        }
+
+        function borrarObservacionIndividual(id) {
+            if (!confirm('¿Estás seguro de que quieres borrar solo la observación de este paciente?')) return;
+
+            let pacientes = JSON.parse(localStorage.getItem('pacientes') || '[]');
+            const index = pacientes.findIndex(pac => pac.id === id);
+
+            if (index !== -1) {
+                pacientes[index].observacion = ''; // Borra solo la observación
+                localStorage.setItem('pacientes', JSON.stringify(pacientes));
+                cargarPacientes(); // Recarga la lista para reflejar el cambio
+            }
+        }
+
+        function cancelarEdicion() {
+            nombreInput.value = '';
+            idDocumentoInput.value = '';
+            observacionInput.value = '';
+            editingPacienteId = null;
+            saveButton.textContent = 'Guardar Observación';
+            cancelEditButton.classList.add('hidden');
+        }
+
+        function eliminarPaciente(id) {
+            if (!confirm('¿Eliminar este paciente y todas sus observaciones?')) return; 
+            
+            let pacientes = JSON.parse(localStorage.getItem('pacientes') || []);
+            pacientes = pacientes.filter(pac => pac.id !== id);
+            localStorage.setItem('pacientes', JSON.stringify(pacientes));
+            cargarPacientes();
+            cancelarEdicion(); // Asegurarse de salir del modo edición si el paciente eliminado era el que se editaba
+        }
+
+        function limpiarTodo() {
+            if (confirm('¿Borrar TODAS las observaciones de pacientes? Esto no se puede deshacer.')) {
+                localStorage.removeItem('pacientes');
+                cargarPacientes();
+                cancelarEdicion(); // Limpiar también el formulario de edición
+            }
+        }
+
+        // --- Funcionalidad de Dictado por Voz ---
+        let recognition;
+        let isListening = false;
+
+        function setupVoiceDictation() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (SpeechRecognition) {
+                recognition = new SpeechRecognition();
+                recognition.continuous = true; // Continúa escuchando
+                recognition.interimResults = true; // Muestra resultados provisionales
+                recognition.lang = 'es-ES'; // Idioma español
+
+                recognition.onstart = () => {
+                    isListening = true;
+                    voiceDictationBtn.classList.add('listening');
+                    voiceDictationBtn.title = 'Escuchando... Haz clic para detener';
+                    console.log('Dictado por voz iniciado...');
+                };
+
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    // Añadir el texto final al campo de observación
+                    if (finalTranscript) {
+                        observacionInput.value += finalTranscript + ' ';
+                    }
+                    // Puedes mostrar el texto provisional en algún lugar si lo deseas
+                    // console.log('Provisional: ', interimTranscript);
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('Error en el dictado por voz:', event.error);
+                    isListening = false;
+                    voiceDictationBtn.classList.remove('listening');
+                    voiceDictationBtn.title = 'Dictar por voz (Error)';
+                    alert('Error en el dictado por voz: ' + event.error + '. Asegúrate de permitir el acceso al micrófono.');
+                };
+
+                recognition.onend = () => {
+                    isListening = false;
+                    voiceDictationBtn.classList.remove('listening');
+                    voiceDictationBtn.title = 'Dictar por voz';
+                    console.log('Dictado por voz detenido.');
+                };
+
+                voiceDictationBtn.addEventListener('click', () => {
+                    if (isListening) {
+                        recognition.stop();
+                    } else {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.error("Error al iniciar el reconocimiento de voz:", e);
+                            alert("No se pudo iniciar el dictado por voz. Asegúrate de que tu navegador lo soporte y el micrófono esté disponible.");
+                        }
+                    }
+                });
+
+            } else {
+                voiceDictationBtn.style.display = 'none'; // Ocultar el botón si no hay soporte
+                console.warn("La API de reconocimiento de voz no es compatible con este navegador.");
+            }
+        }
+
+        function generarHTML() {
+            const pacientes = JSON.parse(localStorage.getItem('pacientes') || '[]');
+            const fecha = new Date().toLocaleDateString('es-ES');
+            
+            const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Observaciones de Pacientes - ${fecha}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .patient {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 3px solid #4a90e2;
+            background: #f8fafc;
+        }
+        .patient-name {
+            color: #2563eb;
+            font-weight: bold;
+            cursor: pointer; /* Añadido para indicar que es clicable */
+        }
+        .patient-name:hover {
+            text-decoration: underline;
+        }
+        .observation-content {
+            display: none; /* ¡Oculto por defecto en el HTML generado! */
+            margin-top: 8px;
+            padding: 8px;
+            background: #f0f9ff;
+            border-radius: 4px;
+        }
+        .date {
+            font-size: 0.8em;
+            color: #666;
+        }
+        h1 {
+            color: #1e3a8a;
+            border-bottom: 2px solid #1e3a8a;
+            padding-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Observaciones de Pacientes - ${fecha}</h1>
+        ${pacientes.map(pac => `
+            <div class="patient">
+                <div class="patient-name" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'block' ? 'none' : 'block'">
+                    ${pac.nombre} (ID: ${pac.idDocumento})
+                </div>
+                <div class="observation-content">
+                    <p class="date">Fecha: ${pac.fecha}</p>
+                    <p>${pac.observacion || 'Sin observación'}</p>
+                </div>
+            </div>
+        `).join('')}
+    </div>
+</body>
+</html>
+            `;
+            
+            // Descargar el archivo
+            const blob = new Blob([html], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `observaciones_pacientes_${fecha.replace(/\//g, '-')}.html`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
